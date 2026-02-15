@@ -245,6 +245,57 @@ export const useQuestionsStore = defineStore('questions', () => {
     }
   }
 
+  async function bulkAddQuestions(
+    categoryId: CategoryId,
+    titles: string[],
+    hints: string[] = [],
+    baseTimeSeconds = 120,
+  ): Promise<{ success: number; failed: number; errors: string[] }> {
+    error.value = null
+    const result = { success: 0, failed: 0, errors: [] as string[] }
+    
+    const currentCount = questionCount(categoryId)
+    const availableSlots = MAX_QUESTIONS_PER_CATEGORY - currentCount
+    
+    if (titles.length > availableSlots) {
+      error.value = `Can only add ${availableSlots} more question(s) to this category`
+      return result
+    }
+
+    try {
+      const userId = await getCurrentUserId()
+      const clampedTime = Math.max(30, Math.min(600, baseTimeSeconds))
+
+      const inserts = titles.map((title, index) => ({
+        user_id: userId,
+        category_id: categoryId,
+        title: title.trim(),
+        hint: hints[index]?.trim() || null,
+        base_time_seconds: clampedTime,
+      }))
+
+      const { data, error: insertErr } = await supabase
+        .from('questions')
+        .insert(inserts)
+        .select()
+
+      if (insertErr) throw insertErr
+      
+      const questions = (data ?? []).map(castQuestion)
+      const bucket = questionsByCategory.value.get(categoryId) ?? []
+      bucket.push(...questions)
+      questionsByCategory.value.set(categoryId, bucket)
+      
+      result.success = questions.length
+      return result
+    } catch (e: unknown) {
+      result.failed = titles.length
+      result.errors.push(e instanceof Error ? e.message : 'Failed to bulk add questions')
+      error.value = result.errors[0]
+      return result
+    }
+  }
+
   async function updateQuestion(
     id: QuestionId,
     categoryId: CategoryId,
@@ -333,6 +384,7 @@ export const useQuestionsStore = defineStore('questions', () => {
     // Question methods
     fetchQuestions,
     addQuestion,
+    bulkAddQuestions,
     updateQuestion,
     deleteQuestion,
     // Misc

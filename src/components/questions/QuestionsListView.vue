@@ -18,18 +18,30 @@
           {{ $t('questions.counter', { current: questionList.length, min: MIN_QUESTIONS_PER_CATEGORY, max: MAX_QUESTIONS_PER_CATEGORY }) }}
         </p>
       </div>
-      <button
-        v-if="store.canAddQuestion(categoryId)"
-        class="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white
-               shadow-sm hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-50 min-h-[44px] shrink-0"
-        :disabled="showAddForm"
-        @click="openAddForm"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
-        </svg>
-        {{ $t('questions.add') }}
-      </button>
+      <div v-if="store.canAddQuestion(categoryId)" class="flex items-center gap-2 shrink-0">
+        <button
+          class="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white
+                 shadow-sm hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-50 min-h-[44px]"
+          :disabled="showAddForm || showBulkForm"
+          @click="openAddForm"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+          {{ $t('questions.add') }}
+        </button>
+        <button
+          class="flex items-center gap-1.5 rounded-lg border border-indigo-600 px-3 py-2 text-sm font-semibold text-indigo-600
+                 hover:bg-indigo-50 active:bg-indigo-100 disabled:opacity-50 min-h-[44px]"
+          :disabled="showAddForm || showBulkForm"
+          @click="openBulkForm"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+          Bulk
+        </button>
+      </div>
       <span v-else-if="questionList.length >= MAX_QUESTIONS_PER_CATEGORY" class="text-xs text-amber-600 font-medium shrink-0">
         {{ $t('questions.limitReached') }}
       </span>
@@ -83,6 +95,62 @@
             class="flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-semibold
                    text-gray-700 hover:bg-gray-50 min-h-[44px]"
             @click="closeAddForm"
+          >
+            {{ $t('common.cancel') }}
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Bulk Add Form -->
+    <div v-if="showBulkForm" class="px-4 py-3 bg-indigo-50 border-b border-indigo-100">
+      <form @submit.prevent="handleBulkAdd" class="flex flex-col gap-2">
+        <div class="text-xs text-indigo-700 mb-1">
+          Enter questions separated by commas, each wrapped in double quotes.<br>
+          Example: "Question 1", "Question 2", "Question 3"
+        </div>
+        <textarea
+          ref="bulkTitlesInput"
+          v-model="bulkTitles"
+          rows="3"
+          placeholder='"What is your biggest strength?", "Describe a challenging project", "Why do you want this role?"'
+          required
+          class="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm
+                 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none resize-none"
+        ></textarea>
+        <div class="text-xs text-gray-600 mb-1">
+          Optional hints (same format, must match question count):
+        </div>
+        <textarea
+          v-model="bulkHints"
+          rows="2"
+          placeholder='"Focus on communication skills", "Mention problem-solving approach", "Connect to company values"'
+          class="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm
+                 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none resize-none"
+        ></textarea>
+        <div class="flex items-center gap-2 text-sm text-gray-600">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span>All questions will use default time: <strong>120 seconds</strong></span>
+        </div>
+        <div v-if="bulkPreview.length > 0" class="text-xs text-gray-600 bg-white rounded p-2 border border-gray-200">
+          <strong>Preview:</strong> {{ bulkPreview.length }} question(s) will be added
+        </div>
+        <div class="flex gap-2">
+          <button
+            type="submit"
+            :disabled="bulkPreview.length === 0"
+            class="flex-1 rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white
+                   hover:bg-indigo-500 disabled:opacity-50 min-h-[44px]"
+          >
+            {{ $t('common.save') }}
+          </button>
+          <button
+            type="button"
+            class="flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-semibold
+                   text-gray-700 hover:bg-gray-50 min-h-[44px]"
+            @click="closeBulkForm"
           >
             {{ $t('common.cancel') }}
           </button>
@@ -308,6 +376,60 @@ async function handleAdd() {
     newBaseTime.value,
   )
   if (result) closeAddForm()
+}
+
+// ── Bulk add ──────────────────────────────────────────────
+const showBulkForm = ref(false)
+const bulkTitles = ref('')
+const bulkHints = ref('')
+const bulkTitlesInput = ref<HTMLTextAreaElement | null>(null)
+
+const bulkPreview = computed(() => {
+  return parseBulkInput(bulkTitles.value)
+})
+
+function parseBulkInput(input: string): string[] {
+  if (!input.trim()) return []
+  // Match strings wrapped in double quotes, separated by commas
+  const regex = /"([^"]*)"/g
+  const matches = []
+  let match
+  while ((match = regex.exec(input)) !== null) {
+    const value = match[1].trim()
+    if (value) matches.push(value)
+  }
+  return matches
+}
+
+function openBulkForm() {
+  showBulkForm.value = true
+  bulkTitles.value = ''
+  bulkHints.value = ''
+  nextTick(() => bulkTitlesInput.value?.focus())
+}
+
+function closeBulkForm() {
+  showBulkForm.value = false
+  bulkTitles.value = ''
+  bulkHints.value = ''
+}
+
+async function handleBulkAdd() {
+  const titles = parseBulkInput(bulkTitles.value)
+  if (titles.length === 0) return
+  
+  const hints = parseBulkInput(bulkHints.value)
+  
+  const result = await store.bulkAddQuestions(
+    props.categoryId,
+    titles,
+    hints,
+    120 // locked default time
+  )
+  
+  if (result.success > 0) {
+    closeBulkForm()
+  }
 }
 
 // ── Edit ──────────────────────────────────────────────────
