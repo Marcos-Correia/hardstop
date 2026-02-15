@@ -120,9 +120,13 @@ create index idx_questions_category_id on public.questions(category_id);
 
 -- Partial index: only rows that are due for review.
 -- This is the hot-path query for buildSession().
+/*
 create index idx_questions_due_review
   on public.questions(user_id, next_review)
   where next_review <= now();
+  */
+  create index idx_questions_user_next_review 
+  on public.questions(user_id, next_review);
 
 alter table public.questions enable row level security;
 
