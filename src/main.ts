@@ -66,6 +66,21 @@ const i18n = createI18n({
         ready: 'Ready to practice!',
         startPractice: 'Start Session',
       },
+      // ── Session lobby ───────────────────────────────
+      lobby: {
+        building: 'Building your session…',
+        errorTitle: 'Something went wrong',
+        tryAgain: 'Try Again',
+        setupRequired: 'Setup Required',
+        setupDescription: 'You need to add more categories and questions before you can practice.',
+        goToSetup: 'Go to Questions Setup',
+        readyTitle: 'Ready to Practice!',
+        readyDescription: '{categories} categories with {questions} total questions',
+        resumeAvailable: 'You have an unfinished session to resume.',
+        startSession: 'Start Session',
+        resumeSession: 'Resume Session',
+        newSession: 'Start New Session Instead',
+      },
     },
   },
 })

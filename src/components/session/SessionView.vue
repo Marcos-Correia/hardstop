@@ -8,6 +8,11 @@ import type { TimerFeedback } from '@/lib/adaptiveTimer'
 import CircularTimer from './CircularTimer.vue'
 import SessionProgress from './SessionProgress.vue'
 
+const emit = defineEmits<{
+  'session-complete': []
+  abandon: []
+}>()
+
 // ── Store ──────────────────────────────────────────────────
 const session = useSessionStore()
 
@@ -127,10 +132,24 @@ async function sendTimerFeedback(feedback: TimerFeedback) {
   <!-- ── Session complete ───────────────────────────────── -->
   <div v-if="isSessionComplete" class="session-done">
     <div class="session-done__card">
+      <div class="session-done__icon">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      </div>
       <h2 class="session-done__title">Session Complete!</h2>
       <p class="session-done__subtitle">
         You answered {{ session.questions.length }} questions. Great work!
       </p>
+      <div class="session-done__actions">
+        <button
+          class="session__btn session__btn--primary session__btn--touch"
+          style="width: 100%;"
+          @click="emit('session-complete')"
+        >
+          Done
+        </button>
+      </div>
     </div>
   </div>
 
@@ -450,6 +469,19 @@ async function sendTimerFeedback(feedback: TimerFeedback) {
 .session-done__subtitle {
   font-size: 1rem;
   color: #6b7280;
+}
+
+.session-done__icon {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
+.session-done__actions {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 /* ── Error details ───────────────────────────────────────── */
