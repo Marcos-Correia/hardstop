@@ -62,24 +62,17 @@ const scores = computed(() => [
   <div class="ai-feedback">
     <h3 class="ai-feedback__title">AI Feedback</h3>
 
-    <!-- ── Score bars ──────────────────────────────────── -->
+    <!-- ── Scores (compact horizontal row) ─────────────── -->
     <div class="ai-feedback__scores">
       <div
         v-for="s in scores"
         :key="s.label"
-        class="ai-feedback__score-row"
+        class="ai-feedback__score-cell"
       >
         <div class="ai-feedback__score-header">
           <span class="ai-feedback__score-icon">{{ s.icon }}</span>
           <span class="ai-feedback__score-label">{{ s.label }}</span>
-          <span
-            class="ai-feedback__score-value"
-            :class="labelColor(s.value)"
-          >
-            {{ pct(s.value) }}
-          </span>
         </div>
-        <p class="ai-feedback__score-desc">{{ s.description }}</p>
         <div class="ai-feedback__bar-track">
           <div
             class="ai-feedback__bar-fill"
@@ -87,20 +80,25 @@ const scores = computed(() => [
             :style="{ width: s.value !== null ? `${s.value * 100}%` : '0%' }"
           />
         </div>
+        <span
+          class="ai-feedback__score-value"
+          :class="labelColor(s.value)"
+        >
+          {{ pct(s.value) }}
+        </span>
       </div>
     </div>
 
-    <!-- ── AI feedback text ────────────────────────────── -->
-    <div v-if="attempt.ai_feedback" class="ai-feedback__text">
-      <h4 class="ai-feedback__text-title">Coach Notes</h4>
-      <p class="ai-feedback__text-body">{{ attempt.ai_feedback }}</p>
-    </div>
+    <!-- ── AI feedback text (inline) ───────────────────── -->
+    <p v-if="attempt.ai_feedback" class="ai-feedback__text-body">
+      <strong class="ai-feedback__text-label">Coach: </strong>{{ attempt.ai_feedback }}
+    </p>
 
-    <!-- ── Corrected answer ────────────────────────────── -->
-    <div v-if="hasCorrectedAnswer" class="ai-feedback__corrected">
-      <h4 class="ai-feedback__corrected-title">Corrected Answer</h4>
+    <!-- ── Corrected answer (collapsible) ──────────────── -->
+    <details v-if="hasCorrectedAnswer" class="ai-feedback__corrected">
+      <summary class="ai-feedback__corrected-toggle">View corrected answer</summary>
       <p class="ai-feedback__corrected-body">{{ attempt.answer_clean }}</p>
-    </div>
+    </details>
   </div>
 </template>
 
@@ -108,65 +106,60 @@ const scores = computed(() => [
 .ai-feedback {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  padding: 1.25rem;
+  gap: 0.625rem;
+  padding: 0.75rem;
   background: #f0f9ff;
   border: 1px solid #bae6fd;
   border-radius: 0.75rem;
 }
 
 .ai-feedback__title {
-  font-size: 1rem;
+  font-size: 0.8125rem;
   font-weight: 700;
   color: #0c4a6e;
   margin: 0;
 }
 
-/* ── Score rows ─────────────────────────────────────────── */
+/* ── Scores: horizontal 3-column grid ─────────────────── */
 .ai-feedback__scores {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
 }
 
-.ai-feedback__score-row {
+.ai-feedback__score-cell {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  align-items: center;
+  gap: 0.125rem;
 }
 
 .ai-feedback__score-header {
   display: flex;
   align-items: center;
-  gap: 0.375rem;
+  gap: 0.25rem;
 }
 
 .ai-feedback__score-icon {
-  font-size: 1rem;
+  font-size: 0.75rem;
   line-height: 1;
 }
 
 .ai-feedback__score-label {
-  font-size: 0.8125rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   color: #1e293b;
-  flex: 1;
 }
 
 .ai-feedback__score-value {
-  font-size: 0.875rem;
+  font-size: 0.75rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
-.ai-feedback__score-desc {
-  font-size: 0.6875rem;
-  color: #64748b;
-  margin: 0;
-}
-
 .ai-feedback__bar-track {
-  height: 0.375rem;
+  width: 100%;
+  height: 0.25rem;
   background: #e2e8f0;
   border-radius: 9999px;
   overflow: hidden;
@@ -178,48 +171,44 @@ const scores = computed(() => [
   transition: width 0.6s ease;
 }
 
-/* ── Feedback text ──────────────────────────────────────── */
-.ai-feedback__text {
-  padding: 0.75rem;
-  background: #ffffff;
-  border-radius: 0.5rem;
-  border: 1px solid #e0f2fe;
-}
-
-.ai-feedback__text-title {
-  font-size: 0.8125rem;
+/* ── Feedback text (inline) ─────────────────────────────── */
+.ai-feedback__text-label {
   font-weight: 600;
   color: #0369a1;
-  margin: 0 0 0.375rem;
 }
 
 .ai-feedback__text-body {
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   color: #334155;
-  line-height: 1.6;
+  line-height: 1.5;
   margin: 0;
 }
 
-/* ── Corrected answer ───────────────────────────────────── */
+/* ── Corrected answer (collapsible) ─────────────────────── */
 .ai-feedback__corrected {
-  padding: 0.75rem;
-  background: #ffffff;
-  border-radius: 0.5rem;
+  border-radius: 0.375rem;
   border: 1px solid #bbf7d0;
+  background: #ffffff;
+  overflow: hidden;
 }
 
-.ai-feedback__corrected-title {
-  font-size: 0.8125rem;
+.ai-feedback__corrected-toggle {
+  font-size: 0.75rem;
   font-weight: 600;
   color: #15803d;
-  margin: 0 0 0.375rem;
+  cursor: pointer;
+  padding: 0.375rem 0.5rem;
+  user-select: none;
 }
 
 .ai-feedback__corrected-body {
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   color: #334155;
-  line-height: 1.6;
+  line-height: 1.5;
   margin: 0;
+  padding: 0 0.5rem 0.5rem;
   white-space: pre-wrap;
+  max-height: 6rem;
+  overflow-y: auto;
 }
 </style>

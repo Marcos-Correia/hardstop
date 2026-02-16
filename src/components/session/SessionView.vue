@@ -278,11 +278,14 @@ async function sendTimerFeedback(feedback: TimerFeedback) {
       <textarea
         id="answer-input"
         v-model="answer"
-        :readonly="isReadOnly"
+        :readonly="isReadOnly || showPostSubmission"
         :placeholder="isReadOnly ? 'Time\'s up!' : 'Type your answer here…'"
         class="session__textarea"
-        :class="{ 'session__textarea--locked': isReadOnly }"
-        rows="6"
+        :class="{
+          'session__textarea--locked': isReadOnly || showPostSubmission,
+          'session__textarea--compact': showPostSubmission,
+        }"
+        :rows="showPostSubmission ? 2 : 6"
       />
 
       <!-- Actions (before submission) -->
@@ -491,6 +494,15 @@ async function sendTimerFeedback(feedback: TimerFeedback) {
   border-color: #d1d5db;
 }
 
+.session__textarea--compact {
+  min-height: 3rem;
+  max-height: 4rem;
+  resize: none;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  padding: 0.5rem 0.75rem;
+}
+
 /* ── Buttons ──────────────────────────────────────────────── */
 .session__actions {
   display: flex;
@@ -552,13 +564,13 @@ async function sendTimerFeedback(feedback: TimerFeedback) {
 .session__post-submission {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
   padding-top: 0.75rem;
   border-top: 1px solid #e5e7eb;
 }
 
 .session__ai-section {
-  min-height: 4rem;
+  min-height: 2.5rem;
 }
 
 /* AI loading spinner */
