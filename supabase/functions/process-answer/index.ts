@@ -12,10 +12,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')!
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-
 interface RequestPayload {
   attemptId: string
   questionTitle: string
@@ -25,6 +21,29 @@ interface RequestPayload {
 }
 
 serve(async (req) => {
+  // ── Validate environment variables ─────────────────────────
+  const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')
+  const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
+  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+
+  if (!OPENAI_API_KEY) {
+    console.error('OPENAI_API_KEY environment variable not set')
+    return new Response(
+      JSON.stringify({
+        error: 'OPENAI_API_KEY not configured. Create supabase/.env.local with: OPENAI_API_KEY=sk-...',
+      }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    console.error('Missing Supabase environment variables')
+    return new Response(
+      JSON.stringify({ error: 'Supabase configuration missing' }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+
   try {
     const payload: RequestPayload = await req.json()
     const { attemptId, questionTitle, answerRaw, userId, questionId } = payload
@@ -42,8 +61,15 @@ serve(async (req) => {
     // ── Phase 2: AI Processing (attempt is already saved by client) ────
     try {
       const [cleaned, evaluation] = await Promise.all([
-        cleanGrammar(answerRaw),
-        evaluateAnswer(questionTitle, answerRaw, userId, questionId, supabase),
+        cleanGrammar(answerRaw, OPENAI_API_KEY),
+        evaluateAnswer(
+          questionTitle,
+          answerRaw,
+          userId,
+          questionId,
+          supabase,
+          OPENAI_API_KEY,
+        ),
       ])
 
       await supabase
@@ -90,12 +116,13 @@ serve(async (req) => {
 async function callOpenAI(
   systemPrompt: string,
   userPrompt: string,
+  apiKey: string,
 ): Promise<string> {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       model: 'gpt-4o-mini',
@@ -118,10 +145,11 @@ async function callOpenAI(
 }
 
 /** Pre-processing: fix grammar and typos */
-async function cleanGrammar(rawText: string): Promise<string> {
+async function cleanGrammar(rawText: string, apiKey: string): Promise<string> {
   return callOpenAI(
     'You are a text editor. Fix grammar and typos only. Do not change meaning, terminology, or sentence structure. Return only the corrected text.',
     rawText,
+    apiKey,
   )
 }
 
@@ -142,6 +170,7 @@ async function evaluateAnswer(
   userId: string,
   questionId: string,
   supabase: ReturnType<typeof createClient>,
+  apiKey: string,
 ): Promise<EvaluationResult> {
   // Fetch the earliest answer for comparison
   const { data: earliest } = await supabase
@@ -180,6 +209,7 @@ Respond in JSON only:
   const raw = await callOpenAI(
     'You are an interview coach evaluating practice answers. Respond in valid JSON only.',
     prompt,
+    apiKey,
   )
 
   try {

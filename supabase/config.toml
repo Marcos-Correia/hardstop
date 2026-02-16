@@ -1,0 +1,10 @@
+project_id = "hardstop"
+
+[api]
+enabled = true
+port = 54321
+
+[edge_runtime]
+enabled = true
+policy = "per_worker"
+inspector_port = 8083

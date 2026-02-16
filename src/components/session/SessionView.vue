@@ -3,10 +3,11 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import { supabase } from '@/lib/supabase'
 import { adjustBaseTime } from '@/lib/adaptiveTimer'
-import type { Question } from '@/types/database'
+import type { Question, Attempt } from '@/types/database'
 import type { TimerFeedback } from '@/lib/adaptiveTimer'
 import CircularTimer from './CircularTimer.vue'
 import SessionProgress from './SessionProgress.vue'
+import AiFeedback from './AiFeedback.vue'
 
 const emit = defineEmits<{
   'session-complete': []
@@ -23,6 +24,15 @@ const secondsLeft = ref(0)
 const isSubmitting = ref(false)
 const hasTimedOut = ref(false)
 const feedbackSent = ref(false)
+
+// AI feedback state
+const isProcessingAi = ref(false)
+const aiFeedbackResult = ref<Attempt | null>(null)
+const aiFeedbackError = ref<string | null>(null)
+const submittedAnswer = ref('')
+
+/** True when the answer has been submitted and we are showing feedback */
+const showPostSubmission = ref(false)
 
 let timer: ReturnType<typeof setInterval> | null = null
 let startedAt = 0       // epoch ms – used to compute duration
@@ -77,6 +87,11 @@ watch(currentQuestion, (q) => {
     answer.value = ''
     hasTimedOut.value = false
     feedbackSent.value = false
+    showPostSubmission.value = false
+    aiFeedbackResult.value = null
+    aiFeedbackError.value = null
+    isProcessingAi.value = false
+    submittedAnswer.value = ''
     startTimer(q.base_time_seconds)
   }
 }, { immediate: true })
@@ -90,26 +105,104 @@ async function submit() {
   stopTimer()
 
   const durationSeconds = Math.round((Date.now() - startedAt) / 1000)
+  const rawAnswer = answer.value || ''
+  submittedAnswer.value = rawAnswer
 
   try {
-    await supabase.from('attempts').insert({
-      question_id: question.id,
-      user_id: question.user_id,
-      answer_raw: answer.value || null,
-      duration_seconds: durationSeconds,
-    })
+    const { data: insertedAttempt, error: insertError } = await supabase
+      .from('attempts')
+      .insert({
+        question_id: question.id,
+        user_id: question.user_id,
+        answer_raw: rawAnswer || null,
+        duration_seconds: durationSeconds,
+      })
+      .select()
+      .maybeSingle()
+
+    if (insertError) throw insertError
 
     // Persist session progress for mobile resume
     session.persistProgress(currentIndex.value + 1)
+
+    // Show the post-submission screen
+    showPostSubmission.value = true
+    isSubmitting.value = false
+
+    // Trigger AI processing in the background (only if answer is non-empty)
+    if (rawAnswer.trim() && insertedAttempt) {
+      processAiFeedback(
+        insertedAttempt.id,
+        question.title,
+        rawAnswer,
+        question.user_id,
+        question.id,
+      )
+    }
   } catch (err) {
     console.error('Failed to save attempt', err)
-  } finally {
     isSubmitting.value = false
-    advance()
+    // Still show post-submission so user can advance
+    showPostSubmission.value = true
+  }
+}
+
+/** Call the process-answer edge function and fetch updated attempt */
+async function processAiFeedback(
+  attemptId: string,
+  questionTitle: string,
+  answerRaw: string,
+  userId: string,
+  questionId: string,
+) {
+  isProcessingAi.value = true
+  aiFeedbackError.value = null
+
+  try {
+    // Invoke the process-answer edge function
+    const { data: fnResponse, error: fnError } = await supabase.functions.invoke(
+      'process-answer',
+      {
+        body: { attemptId, questionTitle, answerRaw, userId, questionId },
+      },
+    )
+
+    // Check for network/HTTP errors
+    if (fnError) throw fnError
+
+    // Check for business logic errors in response body
+    if (
+      !fnResponse ||
+      fnResponse.status === 'failed' ||
+      (fnResponse as Record<string, unknown>).error
+    ) {
+      const errorMsg =
+        ((fnResponse as Record<string, unknown>)?.error as string | undefined) ||
+        'AI processing failed on the server'
+      throw new Error(errorMsg)
+    }
+
+    // Fetch the updated attempt with AI scores
+    const { data: updatedAttempt, error: fetchError } = await supabase
+      .from('attempts')
+      .select('*')
+      .eq('id', attemptId)
+      .single()
+
+    if (fetchError) throw fetchError
+
+    aiFeedbackResult.value = updatedAttempt as Attempt
+  } catch (err) {
+    console.error('AI feedback processing failed', err)
+    aiFeedbackError.value =
+      err instanceof Error ? err.message : 'AI evaluation failed'
+  } finally {
+    isProcessingAi.value = false
   }
 }
 
 function advance() {
+  showPostSubmission.value = false
   currentIndex.value++
 }
 
@@ -192,8 +285,8 @@ async function sendTimerFeedback(feedback: TimerFeedback) {
         rows="6"
       />
 
-      <!-- Actions -->
-      <div class="session__actions">
+      <!-- Actions (before submission) -->
+      <div v-if="!showPostSubmission" class="session__actions">
         <button
           class="session__btn session__btn--primary"
           :disabled="isReadOnly || isSubmitting || !answer.trim()"
@@ -203,32 +296,68 @@ async function sendTimerFeedback(feedback: TimerFeedback) {
         </button>
       </div>
 
-      <!-- Timer feedback (shown after submission / timeout) -->
-      <div v-if="hasTimedOut" class="session__feedback">
-        <p class="session__feedback-label">How was the time limit?</p>
-        <div class="session__feedback-buttons">
-          <button
-            class="session__btn session__btn--outline session__btn--touch"
-            :disabled="feedbackSent"
-            @click="sendTimerFeedback('too_short')"
+      <!-- Post-submission: AI feedback + timer feedback + next -->
+      <div v-if="showPostSubmission" class="session__post-submission">
+        <!-- AI feedback section -->
+        <div class="session__ai-section">
+          <!-- Loading state -->
+          <div v-if="isProcessingAi" class="session__ai-loading">
+            <div class="session__ai-spinner" />
+            <p class="session__ai-loading-text">Evaluating your answer…</p>
+          </div>
+
+          <!-- Error state -->
+          <div v-else-if="aiFeedbackError" class="session__ai-error">
+            <p class="session__ai-error-text">
+              ⚠️ {{ aiFeedbackError }}
+            </p>
+          </div>
+
+          <!-- Results -->
+          <AiFeedback
+            v-else-if="aiFeedbackResult"
+            :attempt="aiFeedbackResult"
+            :original-answer="submittedAnswer"
+          />
+
+          <!-- Empty answer (no AI to run) -->
+          <p
+            v-else-if="!submittedAnswer.trim()"
+            class="session__ai-empty"
           >
-            ⏱ Too Short (+15 s)
-          </button>
-          <button
-            class="session__btn session__btn--outline session__btn--touch"
-            :disabled="feedbackSent"
-            @click="sendTimerFeedback('too_long')"
-          >
-            ⏱ Too Long (−10 s)
-          </button>
-          <button
-            class="session__btn session__btn--outline session__btn--touch"
-            :disabled="feedbackSent"
-            @click="sendTimerFeedback('just_right')"
-          >
-            ✓ Just Right
-          </button>
+            No answer submitted — AI evaluation skipped.
+          </p>
         </div>
+
+        <!-- Timer feedback -->
+        <div class="session__feedback">
+          <p class="session__feedback-label">How was the time limit?</p>
+          <div class="session__feedback-buttons">
+            <button
+              class="session__btn session__btn--outline session__btn--touch"
+              :disabled="feedbackSent"
+              @click="sendTimerFeedback('too_short')"
+            >
+              ⏱ Too Short (+15 s)
+            </button>
+            <button
+              class="session__btn session__btn--outline session__btn--touch"
+              :disabled="feedbackSent"
+              @click="sendTimerFeedback('too_long')"
+            >
+              ⏱ Too Long (−10 s)
+            </button>
+            <button
+              class="session__btn session__btn--outline session__btn--touch"
+              :disabled="feedbackSent"
+              @click="sendTimerFeedback('just_right')"
+            >
+              ✓ Just Right
+            </button>
+          </div>
+        </div>
+
+        <!-- Next question -->
         <button
           class="session__btn session__btn--primary session__btn--touch session__btn--next"
           @click="advance"
@@ -417,6 +546,72 @@ async function sendTimerFeedback(feedback: TimerFeedback) {
 
 .session__btn--outline:hover:not(:disabled) {
   background-color: #f3f4f6;
+}
+
+/* ── Post-submission section ───────────────────────────────── */
+.session__post-submission {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.session__ai-section {
+  min-height: 4rem;
+}
+
+/* AI loading spinner */
+.session__ai-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: #f0f9ff;
+  border-radius: 0.75rem;
+  border: 1px solid #bae6fd;
+}
+
+.session__ai-spinner {
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 2.5px solid #bae6fd;
+  border-top-color: #0284c7;
+  border-radius: 50%;
+  animation: ai-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes ai-spin {
+  to { transform: rotate(360deg); }
+}
+
+.session__ai-loading-text {
+  font-size: 0.875rem;
+  color: #0c4a6e;
+  font-weight: 500;
+  margin: 0;
+}
+
+.session__ai-error {
+  padding: 0.75rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 0.75rem;
+}
+
+.session__ai-error-text {
+  font-size: 0.875rem;
+  color: #991b1b;
+  margin: 0;
+}
+
+.session__ai-empty {
+  font-size: 0.875rem;
+  color: #6b7280;
+  font-style: italic;
+  margin: 0;
+  padding: 0.5rem 0;
 }
 
 /* ── Timer feedback ───────────────────────────────────────── */
