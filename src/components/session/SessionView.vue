@@ -3,6 +3,7 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import { supabase } from '@/lib/supabase'
 import { adjustBaseTime } from '@/lib/adaptiveTimer'
+import { computeSrsUpdate, scoresToGrade } from '@/lib/srs'
 import type { Question, Attempt } from '@/types/database'
 import type { TimerFeedback } from '@/lib/adaptiveTimer'
 import CircularTimer from './CircularTimer.vue'
@@ -122,6 +123,20 @@ async function submit() {
 
     if (insertError) throw insertError
 
+    // Apply SRS update immediately with a neutral grade (3 = "Good")
+    // so that next_review is pushed to the future and the question
+    // won't repeat in a subsequent session started shortly after.
+    const srsUpdate = computeSrsUpdate(question, 3)
+    await supabase
+      .from('questions')
+      .update({
+        ease_factor: srsUpdate.ease_factor,
+        interval: srsUpdate.interval,
+        repetitions: srsUpdate.repetitions,
+        next_review: srsUpdate.next_review,
+      })
+      .eq('id', question.id)
+
     // Persist session progress for mobile resume
     session.persistProgress(currentIndex.value + 1)
 
@@ -192,6 +207,37 @@ async function processAiFeedback(
     if (fetchError) throw fetchError
 
     aiFeedbackResult.value = updatedAttempt as Attempt
+
+    // Re-apply SRS with the AI-derived grade for a more accurate schedule
+    const attempt = updatedAttempt as Attempt
+    const aiGrade = scoresToGrade(
+      attempt.fluency_score,
+      attempt.star_score,
+      attempt.conciseness_score,
+    )
+    const q = currentQuestion.value
+    if (q) {
+      // Use the ORIGINAL question fields (before the neutral-grade update)
+      // to keep the computation consistent: repetitions was already bumped
+      // once, so we re-compute from the pre-bump state.
+      const refinedUpdate = computeSrsUpdate(
+        {
+          ease_factor: q.ease_factor,
+          interval: q.interval,
+          repetitions: q.repetitions,
+        },
+        aiGrade,
+      )
+      await supabase
+        .from('questions')
+        .update({
+          ease_factor: refinedUpdate.ease_factor,
+          interval: refinedUpdate.interval,
+          repetitions: refinedUpdate.repetitions,
+          next_review: refinedUpdate.next_review,
+        })
+        .eq('id', questionId)
+    }
   } catch (err) {
     console.error('AI feedback processing failed', err)
     aiFeedbackError.value =
