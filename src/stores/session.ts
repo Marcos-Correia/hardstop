@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 import { supabase } from '@/lib/supabase'
 import type { Question } from '@/types/database'
 
@@ -152,26 +152,39 @@ export const useSessionStore = defineStore('session', () => {
       )
 
       // ── 4. Guarantee one question per category ───────────────────────
-      //    Prefer due questions; fall back to the one with the oldest next_review.
+      //    Prefer due questions, then new (never-reviewed), then oldest next_review.
       for (const [, bucket] of byCategory) {
         const due = bucket.find((q) => q.next_review <= today)
-        const pick = due ?? bucket[0]             // bucket is already sorted oldest-first
+        const newQ = !due
+          ? bucket.find((q) => q.repetitions === 0)
+          : undefined
+        const pick = due ?? newQ ?? bucket[0]   // bucket is sorted oldest-first
         selected.set(pick.id, pick)
       }
 
       // ── 5. Fill remaining slots ──────────────────────────────────────
-      //    Priority: due questions first, then oldest next_review.
+      //    Priority: due first, then new (never practiced), then
+      //    reviewed-but-not-yet-due as last resort. This prevents
+      //    recently-reviewed questions from repeating before new ones.
       if (selected.size < sessionSize) {
         const remaining = (allQuestions as Question[]).filter(
           (q) => !selected.has(q.id),
         )
 
-        // Partition into due / not-yet-due
+        // Partition into due / new (never reviewed) / reviewed-not-yet-due
         const due = remaining.filter((q) => q.next_review <= today)
-        const notDue = remaining.filter((q) => q.next_review > today)
+        const newQuestions = remaining.filter(
+          (q) => q.next_review > today && q.repetitions === 0,
+        )
+        const reviewedNotDue = remaining.filter(
+          (q) => q.next_review > today && q.repetitions > 0,
+        )
 
-        // Both sub-lists are already ordered by next_review ASC from the query.
-        const filler = [...due, ...notDue]
+        // Due questions are already sorted by next_review ASC.
+        // New questions get shuffled so the user sees variety.
+        // Reviewed-not-due are sorted by next_review ASC (soonest due first)
+        // and only used when due + new are exhausted.
+        const filler = [...due, ...shuffle(newQuestions), ...reviewedNotDue]
 
         let slotsLeft = sessionSize - selected.size
         for (const q of filler) {

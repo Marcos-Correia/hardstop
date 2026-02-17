@@ -39,6 +39,11 @@
           @start-session="goToPractice"
         />
 
+        <!-- Attempts History -->
+        <AttemptsHistoryView
+          v-else-if="activeTab === 'history'"
+        />
+
         <!-- Session lobby: checks readiness before starting -->
         <div v-else-if="activeTab === 'practice' && !sessionActive" class="flex-1 flex flex-col">
           <!-- Loading state while checking / building session -->
@@ -154,16 +159,19 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { supabase } from './lib/supabase'
 import { useSessionStore } from './stores/session'
 import { useQuestionsStore } from './stores/questions'
+import { useAttemptsStore } from './stores/attempts'
 import AuthView from './components/AuthView.vue'
 import SessionView from './components/session/SessionView.vue'
 import QuestionManagement from './components/questions/QuestionManagement.vue'
+import AttemptsHistoryView from './components/AttemptsHistoryView.vue'
 import type { User } from '@supabase/supabase-js'
 
-type TabKey = 'questions' | 'practice'
+type TabKey = 'questions' | 'practice' | 'history'
 
 const tabs: { key: TabKey; label: string }[] = [
   { key: 'questions', label: 'nav.questions' },
   { key: 'practice', label: 'nav.practice' },
+  { key: 'history', label: 'nav.history' },
 ]
 
 const user = ref<User | null>(null)
@@ -172,6 +180,7 @@ const sessionActive = ref(false)
 
 const sessionStore = useSessionStore()
 const questionsStore = useQuestionsStore()
+const attemptsStore = useAttemptsStore()
 
 const totalQuestionCount = computed(() => {
   let total = 0
@@ -190,11 +199,12 @@ onMounted(async () => {
   })
 })
 
-// When user becomes authenticated, load their question data + check for resume
+// When user becomes authenticated, load their data and check for resume
 watch(user, async (u) => {
   if (u) {
     await questionsStore.fetchCategories()
     await sessionStore.tryRestore()
+    await attemptsStore.fetchAttempts()
   } else {
     questionsStore.$reset()
     sessionActive.value = false
