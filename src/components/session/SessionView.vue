@@ -2,7 +2,7 @@
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import { supabase } from '@/lib/supabase'
-import { adjustBaseTime } from '@/lib/adaptiveTimer'
+import { computeTimerAdjustment } from '@/lib/adaptiveTimer'
 import { computeSrsUpdate, scoresToGrade } from '@/lib/srs'
 import type { Question, Attempt } from '@/types/database'
 import type { TimerFeedback } from '@/lib/adaptiveTimer'
@@ -258,17 +258,31 @@ function advance() {
   currentIndex.value++
 }
 
-// ── Timer feedback (adaptive timer with bounds) ────────────
+// ── Timer feedback (adaptive timer with geometric decay) ───
 async function sendTimerFeedback(feedback: TimerFeedback) {
   const question = currentQuestion.value
   if (!question || feedbackSent.value) return
 
   feedbackSent.value = true
-  const newBase = adjustBaseTime(question.base_time_seconds, feedback)
+
+  const result = computeTimerAdjustment(
+    {
+      base_time_seconds: question.base_time_seconds,
+      last_time_feedback: question.last_time_feedback ?? null,
+      time_feedback_streak: question.time_feedback_streak ?? 0,
+      last_time_adjustment: question.last_time_adjustment ?? 15,
+    },
+    feedback,
+  )
 
   await supabase
     .from('questions')
-    .update({ base_time_seconds: newBase })
+    .update({
+      base_time_seconds: result.base_time_seconds,
+      last_time_feedback: result.last_time_feedback,
+      time_feedback_streak: result.time_feedback_streak,
+      last_time_adjustment: result.last_time_adjustment,
+    })
     .eq('id', question.id)
 }
 </script>
@@ -389,25 +403,25 @@ async function sendTimerFeedback(feedback: TimerFeedback) {
           <p class="session__feedback-label">How was the time limit?</p>
           <div class="session__feedback-buttons">
             <button
-              class="session__btn session__btn--outline session__btn--touch"
+              class="session__btn session__btn--secondary"
               :disabled="feedbackSent"
               @click="sendTimerFeedback('too_short')"
             >
-              ⏱ Too Short (+15 s)
+              Too Short
             </button>
             <button
-              class="session__btn session__btn--outline session__btn--touch"
-              :disabled="feedbackSent"
-              @click="sendTimerFeedback('too_long')"
-            >
-              ⏱ Too Long (−10 s)
-            </button>
-            <button
-              class="session__btn session__btn--outline session__btn--touch"
+              class="session__btn session__btn--primary session__btn--touch"
               :disabled="feedbackSent"
               @click="sendTimerFeedback('just_right')"
             >
               ✓ Just Right
+            </button>
+            <button
+              class="session__btn session__btn--secondary"
+              :disabled="feedbackSent"
+              @click="sendTimerFeedback('too_long')"
+            >
+              Too Long
             </button>
           </div>
         </div>
@@ -609,6 +623,20 @@ async function sendTimerFeedback(feedback: TimerFeedback) {
 }
 
 .session__btn--outline:hover:not(:disabled) {
+  background-color: #f3f4f6;
+}
+
+.session__btn--secondary {
+  background-color: transparent;
+  color: #6b7280;
+  border-color: #d1d5db;
+  font-size: 0.75rem;
+  font-weight: 500;
+  min-height: 2.25rem;
+  padding: 0.375rem 0.75rem;
+}
+
+.session__btn--secondary:hover:not(:disabled) {
   background-color: #f3f4f6;
 }
 

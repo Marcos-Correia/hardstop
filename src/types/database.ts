@@ -33,6 +33,9 @@ export interface Question {
   ease_factor: number
   repetitions: number
   base_time_seconds: number
+  last_time_feedback: 'too_short' | 'too_long' | 'just_right' | null
+  time_feedback_streak: number
+  last_time_adjustment: number
   created_at: string
   updated_at: string
 }
