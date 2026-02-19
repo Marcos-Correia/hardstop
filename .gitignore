@@ -36,3 +36,5 @@ lerna-debug.log*
 
 # Supabase
 .supabase/
+supabase/.branches/_current_branch
+supabase/.temp/cli-latest

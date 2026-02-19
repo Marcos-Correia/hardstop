@@ -152,6 +152,9 @@ async function submit() {
         rawAnswer,
         question.user_id,
         question.id,
+        question.question_type ?? 'behavioral',
+        durationSeconds,
+        question.base_time_seconds,
       )
     }
   } catch (err) {
@@ -169,6 +172,9 @@ async function processAiFeedback(
   answerRaw: string,
   userId: string,
   questionId: string,
+  questionType: 'behavioral' | 'general',
+  timeUsedSeconds: number,
+  baseTimeSeconds: number,
 ) {
   isProcessingAi.value = true
   aiFeedbackError.value = null
@@ -178,7 +184,7 @@ async function processAiFeedback(
     const { data: fnResponse, error: fnError } = await supabase.functions.invoke(
       'process-answer',
       {
-        body: { attemptId, questionTitle, answerRaw, userId, questionId },
+        body: { attemptId, questionTitle, answerRaw, userId, questionId, questionType, timeUsedSeconds, baseTimeSeconds },
       },
     )
 

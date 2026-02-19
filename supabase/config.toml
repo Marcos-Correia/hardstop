@@ -8,3 +8,9 @@ port = 54321
 enabled = true
 policy = "per_worker"
 inspector_port = 8083
+
+[functions.process-answer]
+verify_jwt = false
+
+[functions.evaluate-answer]
+verify_jwt = false

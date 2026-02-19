@@ -36,7 +36,7 @@ function labelColor(score: number | null): string {
   return 'text-red-700'
 }
 
-const scores = computed(() => [
+const allScores = computed(() => [
   {
     label: 'Fluency',
     description: 'Clarity, grammar, natural flow',
@@ -56,6 +56,9 @@ const scores = computed(() => [
     icon: '✂️',
   },
 ])
+
+/** Hide STAR row for general questions (star_score is null) */
+const scores = computed(() => allScores.value.filter((s) => s.value !== null))
 </script>
 
 <template>
@@ -63,7 +66,10 @@ const scores = computed(() => [
     <h3 class="ai-feedback__title">AI Feedback</h3>
 
     <!-- ── Scores (compact horizontal row) ─────────────── -->
-    <div class="ai-feedback__scores">
+    <div
+      class="ai-feedback__scores"
+      :style="{ gridTemplateColumns: `repeat(${scores.length}, 1fr)` }"
+    >
       <div
         v-for="s in scores"
         :key="s.label"

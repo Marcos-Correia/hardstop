@@ -14,9 +14,9 @@
 ## Build & Development Commands
 
 ### Prerequisites
-- **Node.js:** v18+ (tested on v18.17.0)
-- **npm:** v9+ (comes with Node)
-- **Supabase CLI:** v1.200+ (for Edge Functions)
+- **Node.js:** v22+ (tested on v22.14.0)
+- **npm:** v11.3+ (comes with Node)
+- **Supabase CLI:** v2.76+ (for Edge Functions)
 
 ### Installation (ALWAYS RUN FIRST)
 ```bash
@@ -325,3 +325,12 @@ const questions: Question[] = data.map(q => ({
 - Use `sm:`, `md:`, `lg:` Tailwind breakpoints
 - Add `env(safe-area-inset-*)` for notched devices
 - Minimum 44px touch targets for buttons (WCAG 2.5.5)
+
+## Deferred Implementation
+
+- User profile management (name, avatar)
+- Other languages (Spanish, French)
+- Password reset flow
+- CI/CD pipeline with GitHub Actions
+- Analytics dashboard for user performance trends
+- Question re-ordering

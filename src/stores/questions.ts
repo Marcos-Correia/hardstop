@@ -211,6 +211,7 @@ export const useQuestionsStore = defineStore('questions', () => {
     title: string,
     hint?: string,
     baseTimeSeconds = 120,
+    questionType: 'behavioral' | 'general' = 'behavioral',
   ): Promise<Question | null> {
     error.value = null
     if (!canAddQuestion(categoryId)) {
@@ -229,6 +230,7 @@ export const useQuestionsStore = defineStore('questions', () => {
           title: title.trim(),
           hint: hint?.trim() || null,
           base_time_seconds: clampedTime,
+          question_type: questionType,
         })
         .select()
         .single()
@@ -250,6 +252,7 @@ export const useQuestionsStore = defineStore('questions', () => {
     titles: string[],
     hints: string[] = [],
     baseTimeSeconds = 120,
+    questionType: 'behavioral' | 'general' = 'behavioral',
   ): Promise<{ success: number; failed: number; errors: string[] }> {
     error.value = null
     const result = { success: 0, failed: 0, errors: [] as string[] }
@@ -272,6 +275,7 @@ export const useQuestionsStore = defineStore('questions', () => {
         title: title.trim(),
         hint: hints[index]?.trim() || null,
         base_time_seconds: clampedTime,
+        question_type: questionType,
       }))
 
       const { data, error: insertErr } = await supabase
@@ -299,7 +303,7 @@ export const useQuestionsStore = defineStore('questions', () => {
   async function updateQuestion(
     id: QuestionId,
     categoryId: CategoryId,
-    updates: { title?: string; hint?: string; base_time_seconds?: number },
+    updates: { title?: string; hint?: string; base_time_seconds?: number; question_type?: 'behavioral' | 'general' },
   ): Promise<boolean> {
     error.value = null
     try {
@@ -309,6 +313,7 @@ export const useQuestionsStore = defineStore('questions', () => {
       if (updates.base_time_seconds !== undefined) {
         payload.base_time_seconds = Math.max(30, Math.min(600, updates.base_time_seconds))
       }
+      if (updates.question_type !== undefined) payload.question_type = updates.question_type
 
       const { error: updateErr } = await supabase
         .from('questions')

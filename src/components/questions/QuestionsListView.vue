@@ -81,6 +81,17 @@
           />
           <span class="text-sm text-gray-500">{{ $t('questions.seconds') }}</span>
         </div>
+        <div class="flex items-center gap-2">
+          <label class="text-sm text-gray-600 shrink-0">{{ $t('questions.typeLabel') }}</label>
+          <select
+            v-model="newQuestionType"
+            class="flex-1 rounded-lg border border-gray-300 px-3 py-2.5 text-sm
+                   focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+          >
+            <option value="behavioral">{{ $t('questions.typeBehavioral') }}</option>
+            <option value="general">{{ $t('questions.typeGeneral') }}</option>
+          </select>
+        </div>
         <div class="flex gap-2">
           <button
             type="submit"
@@ -217,6 +228,17 @@
             />
             <span class="text-sm text-gray-500">{{ $t('questions.seconds') }}</span>
           </div>
+          <div class="flex items-center gap-2 mb-2">
+            <label class="text-sm text-gray-600 shrink-0">{{ $t('questions.typeLabel') }}</label>
+            <select
+              v-model="editQuestionType"
+              class="flex-1 rounded-lg border border-gray-300 px-3 py-2.5 text-sm
+                     focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+            >
+              <option value="behavioral">{{ $t('questions.typeBehavioral') }}</option>
+              <option value="general">{{ $t('questions.typeGeneral') }}</option>
+            </select>
+          </div>
           <div class="flex gap-2">
             <button
               type="submit"
@@ -254,6 +276,14 @@
                   <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 {{ formatTime(question.base_time_seconds) }}
+              </span>
+              <span
+                class="inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium"
+                :class="question.question_type === 'behavioral'
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'bg-gray-100 text-gray-600'"
+              >
+                {{ question.question_type === 'behavioral' ? $t('questions.typeBehavioral') : $t('questions.typeGeneral') }}
               </span>
             </div>
           </div>
@@ -350,6 +380,7 @@ const showAddForm = ref(false)
 const newTitle = ref('')
 const newHint = ref('')
 const newBaseTime = ref(120)
+const newQuestionType = ref<'behavioral' | 'general'>('behavioral')
 const addTitleInput = ref<HTMLInputElement | null>(null)
 
 function openAddForm() {
@@ -357,6 +388,7 @@ function openAddForm() {
   newTitle.value = ''
   newHint.value = ''
   newBaseTime.value = 120
+  newQuestionType.value = 'behavioral'
   nextTick(() => addTitleInput.value?.focus())
 }
 
@@ -365,6 +397,7 @@ function closeAddForm() {
   newTitle.value = ''
   newHint.value = ''
   newBaseTime.value = 120
+  newQuestionType.value = 'behavioral'
 }
 
 async function handleAdd() {
@@ -374,6 +407,7 @@ async function handleAdd() {
     newTitle.value,
     newHint.value || undefined,
     newBaseTime.value,
+    newQuestionType.value,
   )
   if (result) closeAddForm()
 }
@@ -437,6 +471,7 @@ const editingId = ref<QuestionId | null>(null)
 const editTitle = ref('')
 const editHint = ref('')
 const editBaseTime = ref(120)
+const editQuestionType = ref<'behavioral' | 'general'>('behavioral')
 const editTitleInput = ref<HTMLInputElement | null>(null)
 
 function startEdit(question: Question) {
@@ -444,6 +479,7 @@ function startEdit(question: Question) {
   editTitle.value = question.title
   editHint.value = question.hint ?? ''
   editBaseTime.value = question.base_time_seconds
+  editQuestionType.value = question.question_type ?? 'behavioral'
   nextTick(() => {
     const inputs = editTitleInput.value
     if (Array.isArray(inputs)) {
@@ -464,6 +500,7 @@ async function handleUpdate(id: QuestionId) {
     title: editTitle.value,
     hint: editHint.value || undefined,
     base_time_seconds: editBaseTime.value,
+    question_type: editQuestionType.value,
   })
   if (success) editingId.value = null
 }

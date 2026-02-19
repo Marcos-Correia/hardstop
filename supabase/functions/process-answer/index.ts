@@ -18,6 +18,9 @@ interface RequestPayload {
   answerRaw: string
   userId: string
   questionId: string
+  questionType: 'behavioral' | 'general'
+  timeUsedSeconds: number
+  baseTimeSeconds: number
 }
 
 serve(async (req) => {
@@ -46,7 +49,7 @@ serve(async (req) => {
 
   try {
     const payload: RequestPayload = await req.json()
-    const { attemptId, questionTitle, answerRaw, userId, questionId } = payload
+    const { attemptId, questionTitle, answerRaw, userId, questionId, questionType, timeUsedSeconds, baseTimeSeconds } = payload
 
     if (!attemptId || !answerRaw) {
       return new Response(
@@ -60,17 +63,19 @@ serve(async (req) => {
 
     // ── Phase 2: AI Processing (attempt is already saved by client) ────
     try {
-      const [cleaned, evaluation] = await Promise.all([
-        cleanGrammar(answerRaw, OPENAI_API_KEY),
-        evaluateAnswer(
-          questionTitle,
-          answerRaw,
-          userId,
-          questionId,
-          supabase,
-          OPENAI_API_KEY,
-        ),
-      ])
+      // Important: evaluateAnswer depends on the grammatically cleaned answer.
+      const cleaned = await cleanGrammar(answerRaw, OPENAI_API_KEY)
+      const evaluation = await evaluateAnswer(
+        questionTitle,
+        cleaned,
+        questionType ?? 'behavioral',
+        timeUsedSeconds ?? 0,
+        baseTimeSeconds ?? 120,
+        userId,
+        questionId,
+        supabase,
+        OPENAI_API_KEY,
+      )
 
       await supabase
         .from('attempts')
@@ -155,24 +160,26 @@ async function cleanGrammar(rawText: string, apiKey: string): Promise<string> {
 
 interface EvaluationResult {
   fluency: number
-  star: number
+  star: number | null
   conciseness: number
   feedback: string
 }
 
 /**
- * Evaluate the answer against the user's earliest answer
+ * Evaluate the corrected answer against the user's earliest answer
  * for the same question (progression tracking).
  */
 async function evaluateAnswer(
   questionTitle: string,
-  currentAnswer: string,
+  correctedAnswer: string,
+  questionType: 'behavioral' | 'general',
+  timeUsedSeconds: number,
+  baseTimeSeconds: number,
   userId: string,
   questionId: string,
   supabase: ReturnType<typeof createClient>,
   apiKey: string,
 ): Promise<EvaluationResult> {
-  // Fetch the earliest answer for comparison
   const { data: earliest } = await supabase
     .from('attempts')
     .select('answer_raw')
@@ -183,27 +190,45 @@ async function evaluateAnswer(
     .single()
 
   const earliestAnswer = earliest?.answer_raw ?? '(no previous answer)'
+  const isBehavioral = questionType === 'behavioral'
+  const timeRatio = baseTimeSeconds > 0 ? timeUsedSeconds / baseTimeSeconds : 1
+
+  const starInstructions = isBehavioral
+    ? '3. star (0.0–1.0) — Situation/Task/Action/Result structure alignment'
+    : '3. star — always null (this question type does not use STAR)'
+
+  const timeNote = timeRatio < 0.5
+    ? 'The user submitted very quickly relative to the allocated time — be lenient on conciseness.'
+    : timeRatio > 1.1
+    ? 'The user ran over the allocated time — apply normal conciseness standards.'
+    : ''
 
   const prompt = `
 Question: "${questionTitle}"
+Question type: ${questionType}
+Time allocated: ${baseTimeSeconds}s | Time used: ${timeUsedSeconds}s
+${timeNote}
 
 Earliest answer:
 """
 ${earliestAnswer}
 """
 
-Current answer:
+Current answer (grammar-corrected):
 """
-${currentAnswer}
+${correctedAnswer}
 """
 
-Evaluate the current answer on three metrics (0.0 to 1.0):
-1. Fluency — clarity, grammar, natural flow
-2. STAR Method — situation/task/action/result structure alignment
-3. Conciseness — no filler, stays on topic
+Evaluate the current answer on these metrics:
+1. fluency (0.0–1.0) — clarity, grammar, natural flow
+2. conciseness (0.0–1.0) — no filler, stays on topic, appropriate length for time given
+${starInstructions}
 
 Respond in JSON only:
-{"fluency": 0.0, "star": 0.0, "conciseness": 0.0, "feedback": "2-3 sentence constructive feedback comparing progression from earliest to current answer"}
+${isBehavioral
+    ? '{"fluency": 0.0, "star": 0.0, "conciseness": 0.0, "feedback": "2-3 sentence constructive feedback comparing progression from earliest to current answer"}'
+    : '{"fluency": 0.0, "star": null, "conciseness": 0.0, "feedback": "2-3 sentence constructive feedback comparing progression from earliest to current answer"}'
+}
 `
 
   const raw = await callOpenAI(
@@ -213,12 +238,11 @@ Respond in JSON only:
   )
 
   try {
-    // Strip markdown code fences if present
     const cleaned = raw.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
     const parsed = JSON.parse(cleaned)
     return {
       fluency: clampScore(parsed.fluency),
-      star: clampScore(parsed.star),
+      star: parsed.star === null || parsed.star === undefined ? null : clampScore(parsed.star),
       conciseness: clampScore(parsed.conciseness),
       feedback: String(parsed.feedback ?? ''),
     }

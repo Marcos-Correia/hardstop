@@ -1,4 +1,37 @@
-# Supabase Edge Functions
+# Supabase Edge Functions & Migrations
+(read more on [Supabase Edge Functions](https://supabase.com/docs/guides/functions) and [Database Migrations](https://supabase.com/docs/guides/deployment/database-migrations))
+
+## Database Migrations
+
+Migrations are stored in `supabase/migrations/` and define schema changes (tables, columns, constraints, indexes, RLS policies).
+
+
+### Applying Migrations Locally
+
+```bash
+supabase start        # Start local Postgres, Auth, etc.
+supabase db reset     # Apply all migrations from scratch (idempotent)
+```
+
+### Applying Migrations Locally without reset (non-destructive)
+```bash
+supabase db up      # Apply only pending migrations (non-destructive)
+```
+
+`db reset` drops the entire local `public` schema and replays migrations in order. Use this after creating or modifying a migration file.
+
+### Deploying Migrations to Production
+
+```bash
+supabase db push      # Apply all pending migrations to the remote project
+```
+
+**Before pushing:**
+1. Test locally with `supabase db reset`
+2. Verify no data loss (especially for `ALTER TABLE ... DROP COLUMN`)
+3. Run `npm run type-check && npm run build` to ensure the schema matches TS types
+
+---
 
 ## evaluate-answer
 

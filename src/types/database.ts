@@ -27,6 +27,7 @@ export interface Question {
   user_id: UserId
   title: string
   hint: string | null
+  question_type: 'behavioral' | 'general'
   next_review: string        // ISO-8601 timestamptz
   interval: number           // days
   ease_factor: number
