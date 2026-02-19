@@ -119,6 +119,12 @@
                   questions: totalQuestionCount
                 }) }}
               </p>
+              <p v-if="sessionStore.sessionTotalSeconds > 0" class="text-xs text-gray-400 mb-2">
+                {{ $t('lobby.estimatedDuration') }}:
+                <span class="font-semibold text-gray-600">
+                  ~{{ Math.round(sessionStore.sessionTotalSeconds / 60) }} {{ $t('lobby.minutes') }}
+                </span>
+              </p>
               <p v-if="sessionStore.isRestoredSession" class="text-sm text-indigo-600 font-medium mb-4">
                 {{ $t('lobby.resumeAvailable') }}
               </p>

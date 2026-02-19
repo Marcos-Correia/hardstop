@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { supabase } from '@/lib/supabase'
+import { checkSessionBudget, SESSION_MAX_SECONDS } from '@/lib/sessionBudget'
 import type { Question } from '@/types/database'
 
 const MIN_SESSION_SIZE = 5
@@ -34,6 +35,10 @@ export const useSessionStore = defineStore('session', () => {
   const isLoading = ref(false)
   const error = ref<string | null>(null)
   const isRestoredSession = ref(false)
+
+  const sessionTotalSeconds = computed(() =>
+    questions.value.reduce((sum, q) => sum + q.base_time_seconds, 0),
+  )
 
   // ── Persistence ────────────────────────────────────────────
 
@@ -195,7 +200,45 @@ export const useSessionStore = defineStore('session', () => {
       }
 
       // ── 6. Shuffle & store ───────────────────────────────────────────
-      const session = shuffle([...selected.values()])
+      let session = shuffle([...selected.values()])
+
+      // ── 7. Budget check: adjust selection to fit target time window ──
+      const budget = checkSessionBudget(session)
+
+      if (budget.status === 'too_short' && session.length < MAX_SESSION_SIZE) {
+        const extras = (allQuestions as Question[])
+          .filter((q) => !selected.has(q.id))
+          .sort((a, b) => a.next_review.localeCompare(b.next_review))
+
+        for (const extra of extras) {
+          if (session.length >= MAX_SESSION_SIZE) break
+          const candidate = [...session, extra]
+          if (checkSessionBudget(candidate).totalSeconds <= SESSION_MAX_SECONDS) {
+            session = candidate
+            selected.set(extra.id, extra)
+          }
+        }
+      } else if (budget.status === 'too_long' && session.length > MIN_SESSION_SIZE) {
+        const catCount = new Map<string, number>()
+        for (const q of session) {
+          catCount.set(q.category_id, (catCount.get(q.category_id) ?? 0) + 1)
+        }
+
+        const removable = [...session]
+          .sort((a, b) => b.base_time_seconds - a.base_time_seconds)
+          .filter((q) => (catCount.get(q.category_id) ?? 0) > 1)
+
+        for (const candidate of removable) {
+          if (session.length <= MIN_SESSION_SIZE) break
+          const without = session.filter((q) => q.id !== candidate.id)
+          if (checkSessionBudget(without).totalSeconds <= SESSION_MAX_SECONDS) {
+            catCount.set(candidate.category_id, (catCount.get(candidate.category_id) ?? 0) - 1)
+            session = without
+            break
+          }
+        }
+      }
+
       questions.value = session
 
       // Persist immediately so a crash/switch doesn't lose the session
@@ -215,6 +258,7 @@ export const useSessionStore = defineStore('session', () => {
     questions,
     isLoading,
     isRestoredSession,
+    sessionTotalSeconds,
     error,
     buildSession,
     tryRestore,

@@ -84,6 +84,8 @@ const i18n = createI18n({
         goToSetup: 'Go to Questions Setup',
         readyTitle: 'Ready to Practice!',
         readyDescription: '{categories} categories with {questions} total questions',
+        estimatedDuration: 'Estimated duration',
+        minutes: 'min',
         resumeAvailable: 'You have an unfinished session to resume.',
         startSession: 'Start Session',
         resumeSession: 'Resume Session',
