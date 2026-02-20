@@ -4,11 +4,14 @@ import { useSessionStore } from '@/stores/session'
 import { supabase } from '@/lib/supabase'
 import { computeTimerAdjustment } from '@/lib/adaptiveTimer'
 import { computeSrsUpdate, scoresToGrade } from '@/lib/srs'
-import type { Question, Attempt } from '@/types/database'
+import type { Question, Attempt, UserId } from '@/types/database'
 import type { TimerFeedback } from '@/lib/adaptiveTimer'
+import type { SessionSummaryData } from '@/stores/analytics'
+import { asAttemptId } from '@/types/branded'
 import CircularTimer from './CircularTimer.vue'
 import SessionProgress from './SessionProgress.vue'
 import AiFeedback from './AiFeedback.vue'
+import SessionSummary from './SessionSummary.vue'
 
 const emit = defineEmits<{
   'session-complete': []
@@ -34,6 +37,10 @@ const submittedAnswer = ref('')
 
 /** True when the answer has been submitted and we are showing feedback */
 const showPostSubmission = ref(false)
+
+/** True when session is complete and we're showing the summary screen */
+const showSummary = ref(false)
+const sessionSummaryData = ref<SessionSummaryData | null>(null)
 
 let timer: ReturnType<typeof setInterval> | null = null
 let startedAt = 0       // epoch ms – used to compute duration
@@ -122,6 +129,11 @@ async function submit() {
       .maybeSingle()
 
     if (insertError) throw insertError
+
+    // Record the attempt ID in the session store
+    if (insertedAttempt) {
+      session.recordAttempt(asAttemptId(insertedAttempt.id))
+    }
 
     // Apply SRS update immediately with a neutral grade (3 = "Good")
     // so that next_review is pushed to the future and the question
@@ -256,9 +268,39 @@ async function processAiFeedback(
 function advance() {
   showPostSubmission.value = false
   currentIndex.value++
+
+  // Check if session is complete
+  if (currentIndex.value >= session.questions.length) {
+    finalizeSummary()
+  }
 }
 
-// ── Timer feedback (adaptive timer with geometric decay) ───
+/**
+ * Finalize the session and prepare the summary screen.
+ */
+async function finalizeSummary() {
+  try {
+    const { data, error } = await supabase.auth.getUser()
+    if (error) {
+      console.error('Failed to get authenticated user for session summary:', error)
+      return
+    }
+
+    const userId = data.user?.id as UserId | undefined
+    if (!userId) return
+
+    const summary = await session.finalizeSession(userId)
+    if (summary) {
+      sessionSummaryData.value = summary
+      showSummary.value = true
+    }
+  } catch (err) {
+    console.error('Failed to finalize session summary:', err)
+    // Fall back to emitting session-complete if summary fails
+    emit('session-complete')
+  }
+}
+
 async function sendTimerFeedback(feedback: TimerFeedback) {
   const question = currentQuestion.value
   if (!question || feedbackSent.value) return
@@ -285,11 +327,45 @@ async function sendTimerFeedback(feedback: TimerFeedback) {
     })
     .eq('id', question.id)
 }
+
+/**
+ * Summary screen event handlers
+ */
+function handleReviewAnswers() {
+  // TODO: Navigate to history/review view
+  // For now, just emit session-complete to go back
+  emit('session-complete')
+}
+
+function handleNewSession() {
+  session.resetSession()
+  showSummary.value = false
+  sessionSummaryData.value = null
+  currentIndex.value = 0
+  emit('session-complete')
+}
+
+function handleBackToDashboard() {
+  session.resetSession()
+  showSummary.value = false
+  sessionSummaryData.value = null
+  emit('session-complete')
+}
 </script>
 
 <template>
-  <!-- ── Session complete ───────────────────────────────── -->
-  <div v-if="isSessionComplete" class="session-done">
+  <!-- ── Session summary screen ─────────────────────────── -->
+  <div v-if="showSummary && sessionSummaryData">
+    <SessionSummary
+      :summary-data="sessionSummaryData"
+      @review-answers="handleReviewAnswers"
+      @new-session="handleNewSession"
+      @back-to-dashboard="handleBackToDashboard"
+    />
+  </div>
+
+  <!-- ── Session complete (fallback) ────────────────────── -->
+  <div v-else-if="isSessionComplete" class="session-done">
     <div class="session-done__card">
       <div class="session-done__icon">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

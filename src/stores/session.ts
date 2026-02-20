@@ -2,7 +2,9 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { supabase } from '@/lib/supabase'
 import { checkSessionBudget, SESSION_MAX_SECONDS } from '@/lib/sessionBudget'
-import type { Question } from '@/types/database'
+import { useAnalyticsStore } from './analytics'
+import type { Question, AttemptId, UserId } from '@/types/database'
+import type { SessionSummaryData } from './analytics'
 
 const MIN_SESSION_SIZE = 5
 const MAX_SESSION_SIZE = 10
@@ -35,6 +37,10 @@ export const useSessionStore = defineStore('session', () => {
   const isLoading = ref(false)
   const error = ref<string | null>(null)
   const isRestoredSession = ref(false)
+
+  // ── Session summary ────────────────────────────────────
+  const attemptIds = ref<AttemptId[]>([])
+  const sessionSummary = ref<SessionSummaryData | null>(null)
 
   const sessionTotalSeconds = computed(() =>
     questions.value.reduce((sum, q) => sum + q.base_time_seconds, 0),
@@ -244,6 +250,10 @@ export const useSessionStore = defineStore('session', () => {
       // Persist immediately so a crash/switch doesn't lose the session
       persistProgress(0)
 
+      // Reset attempt tracking for new session
+      attemptIds.value = []
+      sessionSummary.value = null
+
       return session
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : 'Failed to build session'
@@ -254,15 +264,62 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
+  /**
+   * Record an attempt ID as part of the current session.
+   * Called after each answer is submitted and saved to the database.
+   */
+  function recordAttempt(attemptId: AttemptId) {
+    if (!attemptIds.value.includes(attemptId)) {
+      attemptIds.value.push(attemptId)
+    }
+  }
+
+  /**
+   * Finalize the session after the last question is answered.
+   * Computes and populates the session summary.
+   * Call this when the user completes all questions in the session.
+   */
+  async function finalizeSession(userId: UserId): Promise<SessionSummaryData | null> {
+    try {
+      const analytics = useAnalyticsStore()
+      const summary = await analytics.computeSessionSummary(
+        attemptIds.value,
+        userId,
+        questions.value,
+      )
+      sessionSummary.value = summary
+      return summary
+    } catch (err) {
+      console.error('Failed to finalize session:', err)
+      return null
+    }
+  }
+
+  /**
+   * Reset session state (typically called when starting a new session or returning to dashboard).
+   */
+  function resetSession() {
+    questions.value = []
+    attemptIds.value = []
+    sessionSummary.value = null
+    error.value = null
+    clearPersistedSession()
+  }
+
   return {
     questions,
     isLoading,
     isRestoredSession,
     sessionTotalSeconds,
     error,
+    attemptIds,
+    sessionSummary,
     buildSession,
     tryRestore,
     persistProgress,
     clearPersistedSession,
+    recordAttempt,
+    finalizeSession,
+    resetSession,
   }
 })
