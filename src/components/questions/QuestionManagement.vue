@@ -42,16 +42,47 @@
       </button>
     </div>
 
+    <!-- Tab Bar (only shown when not viewing a specific category's question list) -->
+    <div
+      v-if="!selectedCategoryId"
+      class="flex items-center gap-1 px-4 py-2 border-b border-gray-200 bg-white"
+    >
+      <button
+        v-for="tab in managementTabs"
+        :key="tab.key"
+        class="rounded-lg px-3 py-2 text-sm font-medium min-h-[44px] transition-colors"
+        :class="activeTab === tab.key
+          ? 'bg-indigo-100 text-indigo-700'
+          : 'text-gray-600 hover:bg-gray-100'"
+        @click="activeTab = tab.key"
+      >
+        {{ $t(tab.label) }}
+      </button>
+    </div>
+
     <!-- Content -->
     <div class="flex-1 overflow-hidden">
+      <!-- Category question list (drills into a specific category) -->
       <QuestionsListView
         v-if="selectedCategoryId"
         :category-id="selectedCategoryId"
         @back="selectedCategoryId = null"
       />
+
+      <!-- Tab: All Questions (CRUD) -->
       <CategoriesView
-        v-else
+        v-else-if="activeTab === 'crud'"
         @select-category="onSelectCategory"
+      />
+
+      <!-- Tab: Performance Heatmap -->
+      <QuestionHeatmap
+        v-else-if="activeTab === 'heatmap'"
+      />
+
+      <!-- Tab: Mastery Progress -->
+      <CategoryProgress
+        v-else-if="activeTab === 'progress'"
       />
     </div>
   </div>
@@ -63,6 +94,16 @@ import { useQuestionsStore } from '@/stores/questions'
 import type { CategoryId } from '@/types/database'
 import CategoriesView from './CategoriesView.vue'
 import QuestionsListView from './QuestionsListView.vue'
+import QuestionHeatmap from './QuestionHeatmap.vue'
+import CategoryProgress from './CategoryProgress.vue'
+
+type ManagementTab = 'crud' | 'heatmap' | 'progress'
+
+const managementTabs: { key: ManagementTab; label: string }[] = [
+  { key: 'crud', label: 'metrics.tabQuestions' },
+  { key: 'heatmap', label: 'metrics.tabHeatmap' },
+  { key: 'progress', label: 'metrics.tabMastery' },
+]
 
 defineEmits<{
   startSession: []
@@ -70,6 +111,7 @@ defineEmits<{
 
 const store = useQuestionsStore()
 const selectedCategoryId = ref<CategoryId | null>(null)
+const activeTab = ref<ManagementTab>('crud')
 
 function onSelectCategory(categoryId: CategoryId) {
   selectedCategoryId.value = categoryId

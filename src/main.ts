@@ -150,6 +150,22 @@ const i18n = createI18n({
         newSession: 'New Session',
         backToDashboard: 'Back to Dashboard',
       },
+      // ── Performance Metrics ─────────────────────────────
+      metrics: {
+        loading: 'Loading your performance data…',
+        noAttempts: 'No practice attempts yet. Start a session to see your performance.',
+        errorLoading: 'Error loading metrics. Please try again.',
+        tabQuestions: 'All Questions',
+        tabHeatmap: 'Heatmap',
+        tabMastery: 'Mastery',
+        dueInDays: 'Due in {count} days',
+        reviewNow: 'Review now!',
+        mastered: 'Mastered',
+        xOfYMastered: '{completed} of {total} mastered',
+        averageScore: 'Avg: {score}%',
+        interviewReadiness: 'Interview Readiness',
+        readinessScore: '{score}% Ready',
+      },
     },
   },
 })

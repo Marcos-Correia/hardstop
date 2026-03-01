@@ -270,6 +270,7 @@ async function handleNewSession() {
 
 function onSessionComplete() {
   sessionStore.clearPersistedSession()
+  questionsStore.clearMetricsCache()
   sessionActive.value = false
 }
 

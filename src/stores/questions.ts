@@ -10,12 +10,61 @@ export const MAX_CATEGORIES = 10
 export const MIN_QUESTIONS_PER_CATEGORY = 3
 export const MAX_QUESTIONS_PER_CATEGORY = 5
 
+// ── Metric types ────────────────────────────────────────────
+
+/** Aggregated metrics for a single question */
+export interface QuestionMetric {
+  questionId: QuestionId
+  questionText: string
+  categoryId: CategoryId
+  categoryName: string
+  lastScore: number           // 0-100, from most recent attempt
+  attemptCount: number
+  lastAttemptDate: Date | null
+  nextReviewDate: Date | null // From questions.next_review
+  isMastered: boolean         // avg score >= 85% over last 3 attempts
+}
+
+/** Aggregated metrics for a category */
+export interface CategoryMetric {
+  categoryId: CategoryId
+  categoryName: string
+  questionCount: number
+  masteredCount: number       // Questions with isMastered = true
+  masteryPercentage: number   // (masteredCount / questionCount) * 100
+  averageScore: number        // Avg across all questions in category (0-100)
+  nextReviewCountdown: number // Days until oldest question is due (negative = overdue)
+}
+
+/** Shape returned by the Supabase join: attempts → questions → categories */
+interface AttemptJoinedCategory {
+  id: string
+  name: string
+}
+
+interface AttemptJoinedQuestion {
+  title: string
+  category_id: string
+  next_review: string | null
+  categories: AttemptJoinedCategory | AttemptJoinedCategory[] | null
+}
+
+// Cache TTL: 5 minutes
+const METRICS_CACHE_TTL = 5 * 60 * 1000
+
 export const useQuestionsStore = defineStore('questions', () => {
   // ── State ─────────────────────────────────────────────────
   const categories = ref<Category[]>([])
   const questionsByCategory = ref<Map<CategoryId, Question[]>>(new Map())
   const isLoading = ref(false)
   const error = ref<string | null>(null)
+
+  // ── Metrics state ─────────────────────────────────────────
+  const questionMetrics = ref<Map<QuestionId, QuestionMetric>>(new Map())
+  const categoryMetrics = ref<Map<CategoryId, CategoryMetric>>(new Map())
+  const metricsLoading = ref(false)
+  const metricsError = ref<string | null>(null)
+  const lastMetricsUpdateTime = ref(0)
 
   // ── Getters ───────────────────────────────────────────────
   const categoryCount = computed(() => categories.value.length)
@@ -356,6 +405,240 @@ export const useQuestionsStore = defineStore('questions', () => {
     }
   }
 
+  // ── Metrics computed ───────────────────────────────────────
+
+  /** Sorted array of question metrics (most recent attempt first) */
+  const questionMetricsArray = computed<QuestionMetric[]>(() => {
+    return Array.from(questionMetrics.value.values()).sort((a, b) => {
+      const aTime = a.lastAttemptDate?.getTime() ?? 0
+      const bTime = b.lastAttemptDate?.getTime() ?? 0
+      return bTime - aTime
+    })
+  })
+
+  /** Sorted array of category metrics (weakest mastery first) */
+  const categoryMetricsArray = computed<CategoryMetric[]>(() => {
+    return Array.from(categoryMetrics.value.values()).sort(
+      (a, b) => a.masteryPercentage - b.masteryPercentage,
+    )
+  })
+
+  /** Composite interview readiness score (0-100): weighted avg of all category mastery */
+  const readinessScore = computed(() => {
+    const arr = categoryMetricsArray.value
+    if (arr.length === 0) return 0
+    const totalScore = arr.reduce((sum, c) => sum + c.averageScore, 0)
+    return Math.round(totalScore / arr.length)
+  })
+
+  /** True if user has at least 1 attempt recorded in metrics */
+  const hasAttempts = computed(() => questionMetrics.value.size > 0)
+
+  // ── Metrics calculation ───────────────────────────────────
+
+  async function calculateMetrics(force = false): Promise<void> {
+    // Skip if cache is fresh (unless forced)
+    if (
+      !force &&
+      lastMetricsUpdateTime.value > 0 &&
+      Date.now() - lastMetricsUpdateTime.value < METRICS_CACHE_TTL
+    ) {
+      return
+    }
+
+    metricsLoading.value = true
+    metricsError.value = null
+
+    try {
+      const userId = await getCurrentUserId()
+
+      // Single query with joins to fetch all data at once
+      const { data, error: fetchErr } = await supabase
+        .from('attempts')
+        .select(`
+          id,
+          question_id,
+          fluency_score,
+          star_score,
+          conciseness_score,
+          created_at,
+          questions:question_id(
+            id,
+            title,
+            next_review,
+            category_id,
+            categories:category_id(
+              id,
+              name
+            )
+          )
+        `)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+
+      if (fetchErr) throw fetchErr
+
+      // ── Group attempts by question_id ───────────────────
+      const attemptsByQuestion = new Map<string, {
+        questionId: QuestionId
+        questionText: string
+        categoryId: CategoryId
+        categoryName: string
+        nextReview: string | null
+        scores: number[]      // average of 3 scores per attempt, 0-100
+        lastAttemptDate: Date | null
+        attemptCount: number
+      }>()
+
+      for (const raw of data ?? []) {
+        const qid = raw.question_id as string
+        const joined = raw.questions as AttemptJoinedQuestion[] | AttemptJoinedQuestion | null
+        const questionData = Array.isArray(joined) ? joined[0] ?? null : joined
+        if (!questionData) continue
+
+        const categoryData = Array.isArray(questionData.categories)
+          ? questionData.categories[0] ?? null
+          : questionData.categories
+
+        const avgScore = averageAttemptScore(
+          raw.fluency_score,
+          raw.star_score,
+          raw.conciseness_score,
+        )
+
+        if (!attemptsByQuestion.has(qid)) {
+          attemptsByQuestion.set(qid, {
+            questionId: asQuestionId(qid),
+            questionText: questionData.title ?? 'Unknown',
+            categoryId: asCategoryId(questionData.category_id ?? ''),
+            categoryName: categoryData?.name ?? 'Unknown',
+            nextReview: questionData.next_review ?? null,
+            scores: [],
+            lastAttemptDate: null,
+            attemptCount: 0,
+          })
+        }
+
+        const entry = attemptsByQuestion.get(qid)!
+        entry.scores.push(avgScore)
+        entry.attemptCount++
+        const attemptDate = new Date(raw.created_at)
+        if (!entry.lastAttemptDate || attemptDate > entry.lastAttemptDate) {
+          entry.lastAttemptDate = attemptDate
+        }
+      }
+
+      // ── Build question metrics ──────────────────────────
+      const newQuestionMetrics = new Map<QuestionId, QuestionMetric>()
+      const categoryAccum = new Map<string, {
+        categoryId: CategoryId
+        categoryName: string
+        totalScore: number
+        questionCount: number
+        masteredCount: number
+        earliestNextReview: Date | null
+      }>()
+
+      for (const entry of attemptsByQuestion.values()) {
+        // Scores are sorted newest first (from query ORDER BY)
+        const lastScore = entry.scores.length > 0 ? Math.round(entry.scores[0]) : 0
+        const last3 = entry.scores.slice(0, 3)
+        const isMastered =
+          last3.length >= 3 && last3.reduce((acc, s) => acc+s, 0) / last3.length >= 85
+
+        const metric: QuestionMetric = {
+          questionId: entry.questionId,
+          questionText: entry.questionText,
+          categoryId: entry.categoryId,
+          categoryName: entry.categoryName,
+          lastScore,
+          attemptCount: entry.attemptCount,
+          lastAttemptDate: entry.lastAttemptDate,
+          nextReviewDate: entry.nextReview ? new Date(entry.nextReview) : null,
+          isMastered,
+        }
+
+        newQuestionMetrics.set(entry.questionId, metric)
+
+        // Accumulate for category metrics
+        const catKey = entry.categoryId as string
+        if (!categoryAccum.has(catKey)) {
+          categoryAccum.set(catKey, {
+            categoryId: entry.categoryId,
+            categoryName: entry.categoryName,
+            totalScore: 0,
+            questionCount: 0,
+            masteredCount: 0,
+            earliestNextReview: null,
+          })
+        }
+        const cat = categoryAccum.get(catKey)!
+        cat.totalScore += lastScore
+        cat.questionCount++
+        if (isMastered) cat.masteredCount++
+
+        if (metric.nextReviewDate) {
+          if (!cat.earliestNextReview || metric.nextReviewDate < cat.earliestNextReview) {
+            cat.earliestNextReview = metric.nextReviewDate
+          }
+        }
+      }
+
+      // ── Build category metrics ──────────────────────────
+      const newCategoryMetrics = new Map<CategoryId, CategoryMetric>()
+
+      for (const cat of categoryAccum.values()) {
+        const now = new Date()
+        const nextReviewCountdown = cat.earliestNextReview
+          ? Math.ceil((cat.earliestNextReview.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+          : -1
+
+        newCategoryMetrics.set(cat.categoryId, {
+          categoryId: cat.categoryId,
+          categoryName: cat.categoryName,
+          questionCount: cat.questionCount,
+          masteredCount: cat.masteredCount,
+          masteryPercentage:
+            cat.questionCount > 0
+              ? Math.round((cat.masteredCount / cat.questionCount) * 100)
+              : 0,
+          averageScore:
+            cat.questionCount > 0
+              ? Math.round(cat.totalScore / cat.questionCount)
+              : 0,
+          nextReviewCountdown,
+        })
+      }
+
+      // ── Commit to state ─────────────────────────────────
+      questionMetrics.value = newQuestionMetrics
+      categoryMetrics.value = newCategoryMetrics
+      lastMetricsUpdateTime.value = Date.now()
+    } catch (e: unknown) {
+      metricsError.value = e instanceof Error ? e.message : 'Failed to load metrics'
+    } finally {
+      metricsLoading.value = false
+    }
+  }
+
+  /** Compute average score from three 0-1 range scores → 0-100 */
+  function averageAttemptScore(
+    fluency: number | null,
+    star: number | null,
+    conciseness: number | null,
+  ): number {
+    const scores = [fluency, star, conciseness].filter(
+      (s): s is number => s !== null && s !== undefined,
+    )
+    if (scores.length === 0) return 0
+    return (scores.reduce((a, b) => a + b, 0) / scores.length) * 100
+  }
+
+  /** Force refresh on next calculateMetrics() call */
+  function clearMetricsCache(): void {
+    lastMetricsUpdateTime.value = 0
+  }
+
   // ── Reset ─────────────────────────────────────────────────
 
   function $reset() {
@@ -363,6 +646,11 @@ export const useQuestionsStore = defineStore('questions', () => {
     questionsByCategory.value = new Map()
     isLoading.value = false
     error.value = null
+    questionMetrics.value = new Map()
+    categoryMetrics.value = new Map()
+    metricsLoading.value = false
+    metricsError.value = null
+    lastMetricsUpdateTime.value = 0
   }
 
   return {
@@ -371,12 +659,22 @@ export const useQuestionsStore = defineStore('questions', () => {
     questionsByCategory,
     isLoading,
     error,
+    // Metrics state
+    questionMetrics,
+    categoryMetrics,
+    metricsLoading,
+    metricsError,
     // Getters
     categoryCount,
     canAddCategory,
     canDeleteCategory,
     isReadyForSession,
     readinessErrors,
+    // Metrics getters
+    questionMetricsArray,
+    categoryMetricsArray,
+    readinessScore,
+    hasAttempts,
     // Category methods
     fetchCategories,
     addCategory,
@@ -392,6 +690,9 @@ export const useQuestionsStore = defineStore('questions', () => {
     bulkAddQuestions,
     updateQuestion,
     deleteQuestion,
+    // Metrics methods
+    calculateMetrics,
+    clearMetricsCache,
     // Misc
     $reset,
   }
