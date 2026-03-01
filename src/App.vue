@@ -221,7 +221,7 @@ function onAuthSuccess() {
   // Auth succeeded; user state will update via the listener
 }
 
-function navigateTab(key: TabKey) {
+async function navigateTab(key: TabKey) {
   if (key === 'practice' && sessionActive.value) {
     // Already in active session, allow going back to it
     activeTab.value = key
@@ -232,11 +232,19 @@ function navigateTab(key: TabKey) {
     sessionActive.value = false
   }
   activeTab.value = key
+
+  if (key === 'practice' && !sessionActive.value && questionsStore.isReadyForSession && sessionStore.questions.length === 0) {
+    await sessionStore.buildSession()
+  }
 }
 
-function goToPractice() {
+async function goToPractice() {
   activeTab.value = 'practice'
   sessionActive.value = false
+
+  if (questionsStore.isReadyForSession && sessionStore.questions.length === 0) {
+    await sessionStore.buildSession()
+  }
 }
 
 async function handleStartSession() {
